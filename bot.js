@@ -5,7 +5,7 @@ import fs from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import ytdl from "ytdl-core";
-import { createCanvas, loadImage } from "canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 
 const __dirname = path.resolve();
 const YT_API = "AIzaSyDD0OfUzCOjVyC_jP1AmY_7fC7XzYcR5sg";
