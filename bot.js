@@ -5,10 +5,12 @@ import fs from "fs";
 import path from "path";
 import fetch from "node-fetch";
 import ytdl from "ytdl-core";
+import { createCanvas, loadImage } from "canvas";
 
 const __dirname = path.resolve();
-const YT_API = "AIzaSyDD0OfUzCOjVyC_jP1AmY_7fC7XzYcR5sg"; // ganti API key YouTube
-const WEATHER_API = "5e9a21afae6892e170bc16ff59be2f2a"; // ganti OpenWeather key
+const YT_API = "AIzaSyDD0OfUzCOjVyC_jP1AmY_7fC7XzYcR5sg";
+const WEATHER_API = "5e9a21afae6892e170bc16ff59be2f2a";
+const NEWS_API = "973812b6a2da484182d902366ad5b61d";
 
 // Folder media
 const mediaDir = path.join(__dirname, "media");
@@ -46,10 +48,31 @@ async function ytDownloadAudio(videoUrl, outDir) {
   return outFile;
 }
 
+// Stiker dari teks
+async function textToSticker(text, outDir) {
+  const canvas = createCanvas(512, 512);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0,0,512,512);
+  ctx.fillStyle = "#000000";
+  ctx.font = "bold 40px Sans";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 256, 256);
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir,{recursive:true});
+  const outFile = path.join(outDir, `sticker-${Date.now()}.png`);
+  fs.writeFileSync(outFile, canvas.toBuffer("image/png"));
+  return outFile;
+}
+
 // Client
 const client = new Client({
   authStrategy: new LocalAuth(),
-  puppeteer: { headless: true, args: ["--no-sandbox","--disable-setuid-sandbox"] }
+  puppeteer: {
+    executablePath: "/data/data/com.termux/files/usr/bin/chromium",
+    headless: true,
+    args: ["--no-sandbox","--disable-setuid-sandbox"]
+  }
 });
 
 client.on("qr", qr => qrcode.generate(qr,{small:true}));
@@ -60,18 +83,20 @@ client.on("message", async msg => {
   const textRaw = msg.body.trim();
   const chatId = msg.from;
 
-  // Menu
+  // MENU
   if(text==="menu") return safeReply(msg,
     `📌 *Menu Bot*\n\n` +
     `1. *menu* → Daftar fitur\n` +
     `2. *gambar* → Kirim gambar random\n` +
     `3. *stiker* → Kirim stiker random\n` +
-    `4. *wikipedia <kata>* → Cari Wikipedia\n` +
-    `5. *cuaca <kota>* → Info cuaca\n` +
-    `6. *youtube <link/judul>* → Download audio YouTube`
+    `4. *stiker <teks>* → Buat stiker dari teks\n` +
+    `5. *wikipedia <kata>* → Cari Wikipedia\n` +
+    `6. *cuaca <kota>* → Info cuaca\n` +
+    `7. *youtube <link/judul>* → Download audio YouTube\n` +
+    `8. *news <kata>* → Berita terbaru`
   );
 
-  // Gambar
+  // GAMBAR
   if(text==="gambar"){
     const file = pickRandomFile(imgDir);
     if(!file) return safeReply(msg,"❌ Tidak ada gambar di folder.");
@@ -79,7 +104,7 @@ client.on("message", async msg => {
     return client.sendMessage(chatId,media,{caption:"🖼️ Random Gambar"});
   }
 
-  // Stiker
+  // STIKER RANDOM
   if(text==="stiker"){
     const file = pickRandomFile(stkDir);
     if(!file) return safeReply(msg,"❌ Tidak ada stiker di folder.");
@@ -87,7 +112,16 @@ client.on("message", async msg => {
     return client.sendMessage(chatId,media,{sendMediaAsSticker:true});
   }
 
-  // Wikipedia
+  // STIKER DARI TEKS
+  if(text.startsWith("stiker ")){
+    const teksSticker = textRaw.slice(7).trim();
+    if(!teksSticker) return safeReply(msg,"⚠️ Masukkan teks untuk stiker.");
+    const outFile = await textToSticker(teksSticker, stkDir);
+    const media = MessageMedia.fromFilePath(outFile);
+    return client.sendMessage(chatId,media,{sendMediaAsSticker:true});
+  }
+
+  // WIKIPEDIA
   if(text.startsWith("wikipedia ")){
     const q = textRaw.slice(10).trim();
     if(!q) return safeReply(msg,"⚠️ Masukkan kata yang mau dicari.");
@@ -99,7 +133,7 @@ client.on("message", async msg => {
     }catch(e){ console.error("Wiki error:",e); return safeReply(msg,"❌ Gagal akses Wikipedia."); }
   }
 
-  // Cuaca
+  // CUACA
   if(text.startsWith("cuaca ")){
     const kota = textRaw.slice(6).trim();
     if(!kota) return safeReply(msg,"⚠️ Masukkan nama kota.");
@@ -112,12 +146,11 @@ client.on("message", async msg => {
     }catch(e){ console.error("Weather error:",e); return safeReply(msg,"❌ Gagal ambil data cuaca."); }
   }
 
-  // YouTube
+  // YOUTUBE
   if(text.startsWith("youtube ")){
     let q = textRaw.slice(8).trim();
     if(!q) return safeReply(msg,"⚠️ Masukkan link atau judul.");
     let url = q;
-
     if(!/^https?:\/\//.test(q)){
       try{
         const rr = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(q)}&key=${YT_API}&maxResults=1`);
@@ -127,13 +160,29 @@ client.on("message", async msg => {
         url = `https://www.youtube.com/watch?v=${item.id.videoId}`;
       }catch(e){ console.error("YT search error",e); return safeReply(msg,"❌ Gagal mencari video YouTube."); }
     }
-
     await safeReply(msg,"⏳ Sedang download audio...");
     const out = await ytDownloadAudio(url,ytDir);
     if(!out) return safeReply(msg,"❌ Gagal membuat file audio.");
     const m = MessageMedia.fromFilePath(out);
     await client.sendMessage(chatId,m,{caption:"🎵 Selesai!"});
   }
-});
 
+  // NEWS
+  if(text.startsWith("news ")){
+    const q = textRaw.slice(5).trim();
+    if(!q) return safeReply(msg,"⚠️ Masukkan kata kunci berita.");
+    try{
+      const r = await fetch(`https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&apiKey=${NEWS_API}&pageSize=3&sortBy=publishedAt`);
+      const d = await r.json();
+      if(d.articles?.length){
+        let out = "📰 Berita Terbaru:\n\n";
+        d.articles.forEach((a,i) => {
+          out += `${i+1}. ${a.title}\n${a.url}\n\n`;
+        });
+        return safeReply(msg,out);
+      } else return safeReply(msg,"❌ Tidak ada berita ditemukan.");
+    }catch(e){ console.error("News error:",e); return safeReply(msg,"❌ Gagal ambil berita."); }
+  }
+
+});
 client.initialize();
